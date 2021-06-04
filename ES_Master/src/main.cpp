@@ -24,6 +24,7 @@ IPAddress NMask = {255, 255, 255, 248};
 
 TaskHandle_t Task1;
 TaskHandle_t Task2;
+static HTTPClient http;
 
 unsigned long currentTime_ms;
 const unsigned long wifiCheckInterval_ms = 10000;

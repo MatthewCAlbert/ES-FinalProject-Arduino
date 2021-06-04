@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <SensorStorage.h>
 #include <HTTPClient.h>
+#include <ESP32Ping.h>
 
 #ifdef ESP32
 #include <WiFi.h>
@@ -18,7 +19,8 @@ class ESWifi
 public:
   static void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info);
   static void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info);
-  static void setCoverStatus(bool status);
+  static String getCoverStatus();
+  static bool setCoverStatus(String command);
 };
 
 class WebSocketServer

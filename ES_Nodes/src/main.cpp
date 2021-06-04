@@ -54,9 +54,9 @@ String createIntroJson()
   return out;
 }
 
-void reconnect(bool first = false)
+void reconnect(bool first = false, bool force = false)
 {
-  if (WiFi.status() != WL_CONNECTED)
+  if (WiFi.status() != WL_CONNECTED || force)
   {
     //Attempt connect again
     if (first)
@@ -76,7 +76,7 @@ void reconnect(bool first = false)
 
     Serial.println("");
     Serial.println("WiFi connection Successful");
-    Serial.print("The IP Address of ESP8266 Module is: ");
+    Serial.print("The IP Address of ESP8266 Sensor Node is: ");
     Serial.print(WiFi.localIP()); // Print the IP address
 
     // Reset fail point
