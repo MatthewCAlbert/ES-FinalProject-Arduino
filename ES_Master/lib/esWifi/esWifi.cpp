@@ -3,13 +3,56 @@
 static HTTPClient http;
 static WiFiClient client;
 
+//NTP
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP);
+String formattedDate;
+String dayStamp;
+String timeStamp;
+
+NTPClient esTimeClient()
+{
+  return timeClient;
+}
+void initNtp()
+{
+  timeClient.begin();
+  timeClient.setTimeOffset(25200); // GMT+7
+}
+
+String getTimestamp()
+{
+  if (!timeClient.update())
+  {
+    timeClient.forceUpdate();
+  }
+  // The formattedDate comes with the following format:
+  // 2018-05-28T16:00:13Z
+  // We need to extract date and time
+  formattedDate = timeClient.getFormattedDate();
+  Serial.println(formattedDate);
+
+  // Extract date
+  int splitT = formattedDate.indexOf("T");
+  dayStamp = formattedDate.substring(0, splitT);
+  // Serial.println(dayStamp);
+  // Extract time
+  timeStamp = formattedDate.substring(splitT + 1, formattedDate.length() - 1);
+  // Serial.println(timeStamp);
+
+  return formattedDate;
+}
+
+// Node
 String sensorIp;
 uint32_t sensorClientId = 0;
+int sensorRssi = 0;
 
 String motorIp = "";
 uint32_t motorClientId = 0;
 bool motorResponded = false;
 String motorStatus = "";
+int motorRssi = 0;
 
 SensorStorage myStorage;
 
@@ -125,12 +168,14 @@ void WebSocketServer::handleWebSocketMessage(void *arg, AsyncWebSocket *server, 
         // Serial.printf("\n Sensor %.2f\n", dat["temperature"]);
         // Serial.printf("\n Sensor %.2f\n", dat["temperature"].as<float>());
         // Serial.printf("\n Sensor %.2f\n", doc["data"]["temperature"]);
-        myStorage.push(doc);
+        sensorRssi = doc["rssi"].as<int>();
+        myStorage.push(doc, getTimestamp());
         Serial.println("Ok sensor data received");
       }
       else if (doc["type"] == "sensor-register")
       {
         sensorIp = doc["ip"].as<char *>();
+        sensorRssi = doc["rssi"].as<int>();
         sensorClientId = client->id();
         Serial.printf("\nRegistered new sensor device: %s (%s)\n", doc["deviceId"].as<char *>(), sensorIp);
       }
@@ -138,6 +183,7 @@ void WebSocketServer::handleWebSocketMessage(void *arg, AsyncWebSocket *server, 
       {
         motorResponded = true;
         motorIp = doc["ip"].as<String>();
+        motorRssi = doc["rssi"].as<int>();
         motorClientId = client->id();
         Serial.printf("\nRegistered new motor device: %s (%s)\n", doc["deviceId"].as<char *>(), motorIp);
       }
@@ -145,6 +191,7 @@ void WebSocketServer::handleWebSocketMessage(void *arg, AsyncWebSocket *server, 
       {
         motorResponded = true;
         motorStatus = doc["motorStatus"].as<char *>();
+        motorRssi = doc["rssi"].as<int>();
         Serial.println("Motor Node Checking In");
         Serial.print(motorStatus);
         Serial.print(doc["message"].as<char *>());
@@ -205,7 +252,8 @@ void WebSocketServer::initWebSocket()
 
 String WebSocketServer::fetchInfo()
 {
-  StaticJsonDocument<200> doc;
+  StaticJsonDocument<300> doc;
+  doc["timestamp"] = getTimestamp();
   String out;
 
   JsonObject motor = doc.createNestedObject("motor");
@@ -214,31 +262,35 @@ String WebSocketServer::fetchInfo()
   {
     motor["status"] = true;
     motor["ip"] = motorIp;
+    motor["rssi"] = motorRssi;
     motor["wsId"] = motorClientId;
   }
   else
   {
     motor["status"] = false;
     motor["ip"] = "";
+    motor["rssi"] = 0;
     motor["wsId"] = "";
   }
   bool sensorAvailable = false;
   if (myStorage.getStorage()[0] != NULL)
   {
     unsigned long lastTimeSensor;
-    lastTimeSensor = myStorage.getStorage()[0]["timestamp"].as<unsigned long>();
+    lastTimeSensor = myStorage.getStorage()[0]["timemillis"].as<unsigned long>();
     sensorAvailable = millis() - lastTimeSensor < 10000;
   }
   if (sensorAvailable)
   {
     sensor["status"] = true;
     sensor["ip"] = sensorIp;
+    sensor["rssi"] = sensorRssi;
     sensor["wsId"] = sensorClientId;
   }
   else
   {
     sensor["status"] = false;
     sensor["ip"] = "";
+    sensor["rssi"] = 0;
     sensor["wsId"] = "";
   }
 
@@ -260,7 +312,7 @@ void WebSocketServer::initWebRoute()
       { request->send(200, "application/json", fetchInfo()); });
   server.on(
       "/sensor/latest", HTTP_GET, [](AsyncWebServerRequest *request)
-      { request->send(200, "application/json", myStorage.fetchAllSerializedJson()); });
+      { request->send(200, "application/json", myStorage.fetchAllSerializedJson(getTimestamp())); });
   server.on(
       "/sensor/index", HTTP_GET, [](AsyncWebServerRequest *request)
       {

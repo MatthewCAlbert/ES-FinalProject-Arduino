@@ -4,7 +4,8 @@
 - [x] Create code for motor node + auto reconnect
 - [x] Send command to motor node
 - [x] Master Node auto reconnect
-- [ ] Get Time and BMKG Weather from API
+- [x] Master Node Time Sync
+- [ ] Get BMKG Weather from API
 - [ ] Create decision if raining or not at Master Node
 - [ ] Tune Motor Driver for Demo
 - [ ] Create MQTT Server using VPS

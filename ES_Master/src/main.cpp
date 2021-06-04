@@ -8,6 +8,8 @@
 // Don't forget to create this file first
 #include "secret.h"
 
+const bool ENABLE_HTTP_ENDPOINT = true;
+
 // WiFi AP Credential
 const char *ap_ssid = "ES_Master";
 const char *ap_password = "5vS4hFyM3fEfFvYt";
@@ -55,7 +57,7 @@ void reconnect(bool first = false)
     Serial.print("\nConnecting to Upstream WiFi");
   else
   {
-    Serial.print("\nReconnecting to Upstrea m WiFi");
+    Serial.print("\nReconnecting to Upstream WiFi");
     WiFi.disconnect();
   }
   WiFi.begin(m_ssid, m_password);
@@ -69,6 +71,11 @@ void reconnect(bool first = false)
   Serial.println("Upstream WiFi connection Successful");
   Serial.print("The IP Address of ESP32 Module is: ");
   Serial.print(WiFi.localIP()); // Print the IP address
+
+  if (first)
+  {
+    initNtp();
+  }
 }
 
 void checkWiFiConnection()
@@ -90,6 +97,15 @@ void checkMotorAvailable(void *parameter)
   {
     ESWifi::pingMotor();
     delay(10000);
+  }
+}
+
+void displayNtpClock(void *parameter)
+{
+  for (;;)
+  {
+    Serial.println(getTimestamp());
+    delay(5000);
   }
 }
 
@@ -119,10 +135,14 @@ void setup()
 
   // Start Server
   WebSocketServer::initWebSocket();
-  WebSocketServer::initWebRoute();
+
+  // Start Web HTTP Route
+  if (ENABLE_HTTP_ENDPOINT)
+    WebSocketServer::initWebRoute();
 
   // Create Multitask
-  xTaskCreatePinnedToCore(checkMotorAvailable, "Check ", 10000, NULL, 0, &Task1, 1);
+  xTaskCreatePinnedToCore(checkMotorAvailable, "Check Motor Availabiliy Status", 10000, NULL, 0, &Task1, 1);
+  // xTaskCreatePinnedToCore(displayNtpClock, "Check Time", 10000, NULL, 0, &Task2, 1);
 }
 
 void loop()

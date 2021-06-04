@@ -2,6 +2,8 @@
 #include <ArduinoJson.h>
 #include <SensorStorage.h>
 #include <HTTPClient.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 #ifdef ESP32
 #include <WiFi.h>
@@ -37,3 +39,7 @@ public:
 private:
   static String authorizedSensorId[];
 };
+
+void initNtp();
+String getTimestamp();
+NTPClient esTimeClient();
