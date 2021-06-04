@@ -1,13 +1,15 @@
 #include "MotorDriver.h"
 
-static int motorTiming = 5000;
 bool motorInProgress = false;
-bool motorOpen = true;
+static int motorTiming = 3000;
+static int en_a = D4;
+static int in_1 = D1;
+static int in_2 = D2;
 
-bool MotorDriver::isOpen()
-{
-  return motorOpen;
-}
+static int en_b = D7;
+static int in_3 = D5;
+static int in_4 = D6;
+
 void MotorDriver::initPin()
 {
   pinMode(en_a, OUTPUT);
@@ -25,7 +27,7 @@ void MotorDriver::initPin()
   analogWrite(en_a, 50);
   analogWrite(en_b, 50);
 }
-bool MotorDriver::sendCommand(String command)
+bool MotorDriver::sendCommand(String command, bool *isOpen)
 {
   if (motorInProgress)
   {
@@ -33,48 +35,31 @@ bool MotorDriver::sendCommand(String command)
     return false;
   }
   motorInProgress = true;
-  if (command == "close" && isOpen())
+  Serial.println(*isOpen ? "OPEN" : "CLOSE");
+  Serial.printf("Trying to %s\n", command.c_str());
+  if (command == "close" && *isOpen)
   {
+    Serial.println("\n[Motor CMD] Sending close command.");
     setMotorRunning(1, 0, 1, 0);
     delay(motorTiming);
     setMotorRunning(0, 0, 0, 0);
-    motorOpen = true;
+    Serial.println("\n[Motor CMD] Motor stopped.");
+    *isOpen = false;
   }
-  else if (command == "open" && !isOpen())
+  else if (command == "open" && !*isOpen)
   {
+    Serial.println("\n[Motor CMD] Sending open command.");
     setMotorRunning(0, 1, 0, 1);
     delay(motorTiming);
     setMotorRunning(0, 0, 0, 0);
-    motorOpen = false;
+    Serial.println("\n[Motor CMD] Motor stopped.");
+    *isOpen = true;
+  }
+  else
+  {
+    Serial.println("\n[Motor CMD] Cannot do this action.");
   }
   motorInProgress = false;
-}
-
-void MotorDriver::toggle()
-{
-  if (isOpen())
-    sendCommand("close");
-  else
-    sendCommand("open");
-}
-
-void MotorDriver::directionControl()
-{
-  // Set motors to maximum speed
-  // For PWM maximum possible values are 0 to 255
-  analogWrite(en_a, 255);
-  analogWrite(en_b, 255);
-
-  // Turn on motor A & B
-  setMotorRunning(1, 0, 1, 0);
-  delay(2000);
-
-  // Now change motor directions
-  setMotorRunning(0, 1, 0, 1);
-  delay(2000);
-
-  // Turn off motors
-  setMotorRunning(0, 0, 0, 0);
 }
 
 void MotorDriver::setMotorRunning(bool in1, bool in2, bool in3, bool in4)
@@ -83,23 +68,4 @@ void MotorDriver::setMotorRunning(bool in1, bool in2, bool in3, bool in4)
   digitalWrite(in_2, in2 ? HIGH : LOW);
   digitalWrite(in_3, in3 ? HIGH : LOW);
   digitalWrite(in_4, in4 ? HIGH : LOW);
-}
-
-void MotorDriver::speedControl()
-{
-  // Accelerate from zero to maximum speed
-  for (int i = 0; i < 256; i++)
-  {
-    analogWrite(en_a, i);
-    analogWrite(en_b, i);
-    delay(20);
-  }
-
-  // Decelerate from maximum speed to zero
-  for (int i = 255; i >= 0; --i)
-  {
-    analogWrite(en_a, i);
-    analogWrite(en_b, i);
-    delay(20);
-  }
 }

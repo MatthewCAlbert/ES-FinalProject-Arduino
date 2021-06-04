@@ -3,9 +3,19 @@
 static HTTPClient http;
 static WiFiClient client;
 
-static String sensorIp;
+String sensorIp;
+uint32_t sensorClientId = 0;
+
 String motorIp = "";
+uint32_t motorClientId = 0;
+bool motorResponded = false;
+String motorStatus = "";
+
 SensorStorage myStorage;
+
+// Websockets
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
 
 int connectedDevice = 0;
 void ESWifi::WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info)
@@ -16,92 +26,51 @@ void ESWifi::WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
 {
   connectedDevice--;
 }
+void ESWifi::pingMotor()
+{
+  if (motorIp == "" || motorClientId == 0 || !motorResponded)
+  {
+    Serial.println("Motor failed to reach.");
+    return;
+  }
+  StaticJsonDocument<128> doc;
+  String out;
+  doc["type"] = "motor-check";
+  serializeJson(doc, out);
+
+  Serial.printf("\n Ping sent to Client #%d\n", motorClientId);
+  ws.text(motorClientId, out);
+  motorResponded = false;
+}
 String ESWifi::getCoverStatus()
 {
-  Serial.println(motorIp);
-  if (motorIp == "")
+  Serial.printf("%s : #%u \n", motorIp.c_str(), motorClientId);
+  if (motorIp == "" || !motorResponded || motorClientId == 0)
   {
     Serial.println("Motor node not connected");
     return "error";
   }
-  if (!Ping.ping(motorIp.c_str(), 3))
-  {
-    return "server not responding";
-  }
-  String serverPath = "http://" + motorIp + "/status";
-  bool httpInitResult = http.begin(client, serverPath.c_str());
-  http.addHeader("Keep-Alive", "timeout=2, max=1");
-
-  Serial.println("[INFO] Before sending GET");
-
-  // Send HTTP GET request
-  int httpResponseCode = http.GET();
-
-  Serial.println("[INFO] Before fetch payload");
-
-  String payload;
-  if (httpResponseCode > 0)
-  {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
-    payload = http.getString();
-  }
-  else
-  {
-    Serial.print("Error code: ");
-    Serial.println(httpResponseCode);
-    return "error";
-  }
-  // Free resources
-  http.end();
-
-  return payload;
+  return motorStatus == "" ? "no status" : motorStatus;
 }
 bool ESWifi::setCoverStatus(String command)
 {
-  if (motorIp == "")
+  if (motorIp == "" || !motorResponded || motorClientId == 0)
   {
     Serial.println("Motor node not connected");
     return false;
   }
-  String serverPath = "http://" + motorIp + "/status/set/" + (command == "open" ? "open" : "close");
-  bool httpInitResult = http.begin(client, serverPath.c_str());
-  http.addHeader("Keep-Alive", "timeout=3, max=5");
-  if (httpInitResult == false)
-  {
-    Serial.println("http.begin() failed!"); //debug
-    return false;
-  }
-  // Send HTTP GET request
-  int httpResponseCode = http.GET();
+  StaticJsonDocument<128> doc;
+  String out;
+  doc["type"] = "motor-command";
+  doc["command"] = command;
+  serializeJson(doc, out);
 
-  if (httpResponseCode > 0)
-  {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
-    String payload = http.getString();
-    Serial.println(payload);
-  }
-  else
-  {
-    Serial.print("Error code: ");
-    Serial.println(httpResponseCode);
-  }
-  // Free resources
-  http.end();
-  if (httpResponseCode > 0)
-  {
-    return true;
-  }
-  else
-  {
-    return false;
-  }
+  motorResponded = false;
+  Serial.printf("\nCommand Sent to Client #%d\n", motorClientId);
+  ws.text(motorClientId, out);
+
+  return true;
 }
-
-// Websockets
-AsyncWebServer server(80);
-AsyncWebSocket ws("/ws");
 
 void WebSocketServer::notifyClients()
 {
@@ -157,12 +126,35 @@ void WebSocketServer::handleWebSocketMessage(void *arg, AsyncWebSocket *server, 
         // Serial.printf("\n Sensor %.2f\n", dat["temperature"].as<float>());
         // Serial.printf("\n Sensor %.2f\n", doc["data"]["temperature"]);
         myStorage.push(doc);
-        Serial.println("\nOk sensor data received");
+        Serial.println("Ok sensor data received");
       }
       else if (doc["type"] == "sensor-register")
       {
         sensorIp = doc["ip"].as<char *>();
-        Serial.printf("\nRegistered new sensor device: %s (%s)\n", doc["deviceId"], sensorIp);
+        sensorClientId = client->id();
+        Serial.printf("\nRegistered new sensor device: %s (%s)\n", doc["deviceId"].as<char *>(), sensorIp);
+      }
+      else if (doc["type"] == "motor-register")
+      {
+        motorResponded = true;
+        motorIp = doc["ip"].as<String>();
+        motorClientId = client->id();
+        Serial.printf("\nRegistered new motor device: %s (%s)\n", doc["deviceId"].as<char *>(), motorIp);
+      }
+      else if (doc["type"] == "motor-check")
+      {
+        motorResponded = true;
+        motorStatus = doc["motorStatus"].as<char *>();
+        Serial.println("Motor Node Checking In");
+        Serial.print(motorStatus);
+        Serial.print(doc["message"].as<char *>());
+        // Serial.printf("%s : %s\n", motorStatus.c_str(), doc["message"].as<char *>());
+      }
+      else if (doc["type"] == "motor-respond")
+      {
+        motorResponded = true;
+        motorStatus = doc["motorStatus"].as<char *>();
+        Serial.printf("\nMotor Responded: %s \n", doc["deviceId"].as<char *>(), doc["message"]);
       }
       else
       {
@@ -191,7 +183,7 @@ void WebSocketServer::onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *cl
     Serial.printf("\nWebSocket client #%u disconnected\n", client->id());
     break;
   case WS_EVT_DATA:
-    Serial.printf("\nMessage Received from #%u", client->id());
+    Serial.printf("\nMessage Received from #%u: ", client->id());
     handleWebSocketMessage(arg, server, client, data, len);
     break;
   case WS_EVT_PONG:
@@ -211,6 +203,50 @@ void WebSocketServer::initWebSocket()
   server.begin();
 }
 
+String WebSocketServer::fetchInfo()
+{
+  StaticJsonDocument<200> doc;
+  String out;
+
+  JsonObject motor = doc.createNestedObject("motor");
+  JsonObject sensor = doc.createNestedObject("sensor");
+  if (motorResponded)
+  {
+    motor["status"] = true;
+    motor["ip"] = motorIp;
+    motor["wsId"] = motorClientId;
+  }
+  else
+  {
+    motor["status"] = false;
+    motor["ip"] = "";
+    motor["wsId"] = "";
+  }
+  bool sensorAvailable = false;
+  if (myStorage.getStorage()[0] != NULL)
+  {
+    unsigned long lastTimeSensor;
+    lastTimeSensor = myStorage.getStorage()[0]["timestamp"].as<unsigned long>();
+    sensorAvailable = millis() - lastTimeSensor < 10000;
+  }
+  if (sensorAvailable)
+  {
+    sensor["status"] = true;
+    sensor["ip"] = sensorIp;
+    sensor["wsId"] = sensorClientId;
+  }
+  else
+  {
+    sensor["status"] = false;
+    sensor["ip"] = "";
+    sensor["wsId"] = "";
+  }
+
+  serializeJson(doc, out);
+
+  return out;
+}
+
 void WebSocketServer::initWebRoute()
 {
   server.on(
@@ -219,6 +255,9 @@ void WebSocketServer::initWebRoute()
         Serial.println("\n[HTTP Received] Server Checked");
         request->send_P(200, "text/plain", "Ok");
       });
+  server.on(
+      "/info", HTTP_GET, [](AsyncWebServerRequest *request)
+      { request->send(200, "application/json", fetchInfo()); });
   server.on(
       "/sensor/latest", HTTP_GET, [](AsyncWebServerRequest *request)
       { request->send(200, "application/json", myStorage.fetchAllSerializedJson()); });
@@ -235,44 +274,21 @@ void WebSocketServer::initWebRoute()
         }
         request->send(200, "application/json", myStorage.fetchSerializedJson(requestedIndex));
       });
-  server.on(
-      "/motor/updateip", HTTP_POST, [](AsyncWebServerRequest *request)
-      {
-        Serial.println("\n[HTTP Received] Motor IP Update");
-        String motorDeviceId;
 
-        if (request->hasParam("deviceId", true))
-          motorDeviceId = request->getParam("deviceId", true)->value();
-
-        if (request->hasParam("ip", true))
-        {
-          motorIp = request->getParam("ip", true)->value();
-          Serial.printf("\n[Motor Node] Connected with IP:%s\n", motorIp.c_str());
-          request->send(200, "text/plain", "Motor IP Received");
-        }
-        else
-        {
-          Serial.println("[HTTP Received] IP not included");
-          request->send(400, "text/plain", "Motor IP Not Received");
-        }
-      });
   server.on(
       "/motor/status", HTTP_GET, [](AsyncWebServerRequest *request)
       { request->send_P(200, "text/plain", ESWifi::getCoverStatus().c_str()); });
 
   // Server Motor Control
   server.on(
+      "/motor/set/toggle", HTTP_GET, [](AsyncWebServerRequest *request)
+      { request->send_P(200, "text/plain", ESWifi::setCoverStatus(motorStatus == "closed" ? "open" : "close") ? "Sent" : "Failed"); });
+  server.on(
       "/motor/set/open", HTTP_GET, [](AsyncWebServerRequest *request)
-      {
-        request->send_P(200, "text/plain", "Ok");
-        ESWifi::setCoverStatus("open");
-      });
+      { request->send_P(200, "text/plain", ESWifi::setCoverStatus("open") ? "Sent" : "Failed"); });
   server.on(
       "/motor/set/close", HTTP_GET, [](AsyncWebServerRequest *request)
-      {
-        request->send_P(200, "text/plain", "Ok");
-        ESWifi::setCoverStatus("close");
-      });
+      { request->send_P(200, "text/plain", ESWifi::setCoverStatus("close") ? "Sent" : "Failed"); });
 }
 
 void WebSocketServer::wsLoop()

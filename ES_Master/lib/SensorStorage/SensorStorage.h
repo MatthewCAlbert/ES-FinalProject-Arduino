@@ -11,6 +11,7 @@ public:
     {
       storage[i] = storage[i - 1];
     }
+    data["timestamp"] = millis();
     storage[0] = data;
   }
   StaticJsonDocument<JSON_CAPACITY> *getStorage()
@@ -24,21 +25,25 @@ public:
   String fetchAllSerializedJson()
   {
     String out = "";
+    String outJson = "";
+    StaticJsonDocument<300 * 10> doc;
+    doc["current_timestamp"] = millis();
+    JsonArray nested = doc.createNestedArray("data");
 
     for (int i = 0; i < 10; i++)
-    {
-      if (i == 0)
-      {
-        out += "[";
-      }
-      out += fetchSerializedJson(i);
-      if (i < 9)
-        out += ",";
-      else
-        out += "]";
-    }
+      nested.add(storage[i]);
 
-    return out;
+    // for (int i = 0; i < 10; i++)
+    // {
+    //   out += fetchSerializedJson(i);
+    //   if (i < 9)
+    //     out += ",";
+    // }
+    // doc["data"] = "[" + out + "]";
+
+    serializeJson(doc, outJson);
+
+    return outJson;
   }
 
 private:

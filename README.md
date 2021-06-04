@@ -1,20 +1,25 @@
 # Embedded System Final Project
 
 ## To Do
-- [ ] Create code for motor node + auto reconnect
-- [ ] Send command to motor node
-- [ ] Master Node auto reconnect
+- [x] Create code for motor node + auto reconnect
+- [x] Send command to motor node
+- [x] Master Node auto reconnect
 - [ ] Get Time and BMKG Weather from API
 - [ ] Create decision if raining or not at Master Node
 - [ ] Tune Motor Driver for Demo
-- [ ] Implement RF Remote using NRF24L01
 - [ ] Create MQTT Server using VPS
 - [ ] MQTT Connection between Master Node and MQTT Broker
 - [ ] Enable bluetooth control capability using MIT AppInventor 2
 
 ## Optional
+- [ ] Implement RF Remote using NRF24L01
 - [ ] Enable SSL for WebSocket and WebServer HTTP
 
 ## Done
 - [x] Sensor Node
-- [x] Master Node (main function)
+- [x] Motor Node
+- [x] Master/Fog Node (main function)
+
+## Usage
+- Use Platform.io with VSCode to built.
+- **ES_Nodes** comprises of two projects (motor node and sensor node) so edit its platformio.ini and disable other corresponding **main**.

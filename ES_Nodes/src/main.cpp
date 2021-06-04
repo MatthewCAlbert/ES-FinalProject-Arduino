@@ -79,18 +79,18 @@ void reconnect(bool first = false, bool force = false)
     Serial.print("The IP Address of ESP8266 Sensor Node is: ");
     Serial.print(WiFi.localIP()); // Print the IP address
 
-    // Reset fail point
-    String introData = createIntroJson();
-    WS::sendJson(introData);
-    Serial.println("");
-    Serial.println(introData);
-    WS::setReplied(true);
-    failCounter = 0;
-
     if (first)
       WS::initWsClient();
     else
       WS::connectToWs();
+
+    // Reset fail point
+    failCounter = 0;
+    WS::setReplied(true);
+    String introData = createIntroJson();
+    WS::sendJson(introData);
+    Serial.println("");
+    Serial.println(introData);
   }
 }
 

@@ -1,47 +1,142 @@
 #include <Arduino.h>
+#include <ArduinoWebsockets.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
-#include <ESP8266WebServer.h>
 #include <MotorDriver.h>
 #include <ArduinoJson.h>
 
 const String deviceId = "73aecc58-9e23-44a6-bfd0-0ef2af38435c";
+const char *websockets_server_host = "10.10.1.1"; //Enter server adress
+const uint16_t websockets_server_port = 80;       // Enter server port
+
+// Store motor state
+bool motorOpen = true;
 
 const char *ssid = "ES_Master";            //Enter SSID
 const char *password = "5vS4hFyM3fEfFvYt"; //Enter Password
 
-ESP8266WebServer server(80);
-String header;
-
 String serverUpstreamAddress = "http://10.10.1.1";
+websockets::WebsocketsClient client;
 
 // Timer
 unsigned long currentTime;
 unsigned long prevTimeConnCheck = 0;
-const unsigned long intervalConnCheck = 10000;
+const unsigned long intervalConnCheck = 5000;
+int failCounter = 0;
 
-bool sendIpAddress()
+// Websocket shit
+bool wsReplied;
+void connectToWs()
 {
-  Serial.println("Sending IP Address..");
-  HTTPClient http;
-  String serverPath = serverUpstreamAddress + "/motor/updateip";
-  http.begin(serverPath.c_str());
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-
-  // Send HTTP POST request
-  String postData = "deviceId=" + deviceId + "&ip=" + WiFi.localIP().toString();
-  int httpResponseCode = http.POST(postData);
-
-  if (httpResponseCode > 0)
+  if (client.connect(websockets_server_host, websockets_server_port, "/ws"))
   {
-    String payload = http.getString();
-    Serial.println(payload);
+    Serial.println("WS Connected!");
   }
+}
 
-  // Free resources
-  http.end();
+String createMotorResponseJson(String type, String message)
+{
+  StaticJsonDocument<300> doc;
+  String motorStat = motorOpen ? "open" : "closed";
+  doc["deviceId"] = deviceId;
+  doc["type"] = type;
+  doc["rssi"] = WiFi.RSSI();
+  doc["ip"] = WiFi.localIP();
+  doc["message"] = message;
+  doc["motorStatus"] = motorStat;
 
-  return (httpResponseCode == 200);
+  // Serial.printf("\nMotor status: %s\n", motorStat.c_str());
+
+  String out;
+  serializeJson(doc, out);
+
+  return out;
+}
+
+void sendJson(String message)
+{
+  client.send(message);
+}
+
+void wsOnMessageCallback(websockets::WebsocketsMessage message)
+{
+  wsReplied = true;
+  StaticJsonDocument<128> doc;
+  Serial.println("Receiving message!");
+  DeserializationError err = deserializeJson(doc, message.data());
+  if (err)
+  {
+    Serial.printf("\n[WS Non-JSON Message] (%s)\n", message.data().c_str());
+  }
+  else
+  {
+    Serial.printf("\n[WS JSON Message] (%s)\n", message.data().c_str());
+    if (doc["type"] == "motor-command")
+    {
+      MotorDriver::sendCommand(doc["command"].as<char *>(), &motorOpen);
+    }
+    else if (doc["type"] == "motor-check")
+    {
+      sendJson(createMotorResponseJson("motor-check", "Alive"));
+    }
+    else
+      Serial.println("Unrecognized command");
+  }
+}
+
+void wsOnEventsCallback(websockets::WebsocketsEvent event, String data)
+{
+  if (event == websockets::WebsocketsEvent::ConnectionOpened)
+  {
+    Serial.println("\nConnnection Opened");
+  }
+  else if (event == websockets::WebsocketsEvent::ConnectionClosed)
+  {
+    Serial.println("\nConnnection Closed");
+  }
+  else if (event == websockets::WebsocketsEvent::GotPing)
+  {
+    Serial.println("Got a Ping!");
+  }
+  else if (event == websockets::WebsocketsEvent::GotPong)
+  {
+    Serial.println("Got a Pong!");
+  }
+}
+void initWsClient()
+{
+  // run callback when messages are received
+  client.onMessage(wsOnMessageCallback);
+
+  // run callback when events are occuring
+  client.onEvent(wsOnEventsCallback);
+
+  connectToWs();
+}
+
+String createIntroJson()
+{
+  StaticJsonDocument<128> doc;
+  doc["deviceId"] = deviceId;
+  doc["type"] = "motor-register";
+  doc["rssi"] = WiFi.RSSI();
+  doc["ip"] = WiFi.localIP();
+
+  String out;
+  serializeJson(doc, out);
+
+  return out;
+}
+
+void toggleMotor()
+{
+  if (motorOpen)
+  {
+    MotorDriver::sendCommand("close", &motorOpen);
+  }
+  else
+  {
+    MotorDriver::sendCommand("open", &motorOpen);
+  }
 }
 
 void reconnect(bool first = false, bool force = false)
@@ -68,38 +163,19 @@ void reconnect(bool first = false, bool force = false)
     Serial.print("The IP Address of ESP8266 Motor Node is: ");
     Serial.print(WiFi.localIP()); // Print the IP address
 
-    // if (sendIpAddress())
-    //   Serial.println("IP Sent!");
-    // else
-    //   Serial.println("IP Sending Failed!");
-  }
-}
+    if (first)
+      initWsClient();
+    else
+      connectToWs();
 
-bool checkConnection()
-{
-  HTTPClient http;
-  String serverPath = serverUpstreamAddress + "/check";
-  http.begin(serverPath.c_str());
-
-  // Send HTTP GET request
-  int httpResponseCode = http.GET();
-
-  if (httpResponseCode > 0)
-  {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
-    String payload = http.getString();
-    Serial.println(payload);
+    // Reset fail point
+    failCounter = 0;
+    String introData = createIntroJson();
+    sendJson(introData);
+    Serial.println("");
+    Serial.println(introData);
+    wsReplied = true;
   }
-  else
-  {
-    Serial.print("Error code: ");
-    Serial.println(httpResponseCode);
-    reconnect(false, true);
-  }
-  // Free resources
-  http.end();
-  return (httpResponseCode > 0);
 }
 
 void setup()
@@ -109,22 +185,38 @@ void setup()
   MotorDriver::initPin();
 
   reconnect(true);
-
-  // initWebRoute();
-  // server.begin();
+  wsReplied = true;
 }
 
 void loop()
 {
   currentTime = millis();
-  // server.handleClient();
 
   // Always check for connection
   if (currentTime - prevTimeConnCheck > intervalConnCheck)
   {
     Serial.println("\nChecking for connection.");
     prevTimeConnCheck = currentTime;
-    MotorDriver::toggle();
-    // checkConnection();
+    // toggleMotor();
+    if (failCounter > 2)
+    {
+      Serial.println("No reply");
+      reconnect(false, true);
+      // ESP.reset();
+      return;
+    }
+    if (!wsReplied)
+    {
+      failCounter++;
+    }
+    else
+    {
+      failCounter = 0;
+      wsReplied = false;
+      sendJson(createMotorResponseJson("motor-check", "Ok"));
+    }
+    reconnect();
   }
+
+  client.poll();
 }

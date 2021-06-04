@@ -2,8 +2,6 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <utils.h>
-// #include <rf.h>
-#include <oled.h>
 #include <esWifi.h>
 #include <HTTPClient.h>
 
@@ -86,14 +84,20 @@ void checkWiFiConnection()
   }
 }
 
+void checkMotorAvailable(void *parameter)
+{
+  for (;;)
+  {
+    ESWifi::pingMotor();
+    delay(10000);
+  }
+}
+
 void setup()
 {
   // put your setup code here, to run once:
   Serial.begin(115200);
-  initI2C();
-
-  // Init OLED
-  // OLED::initOled();
+  // initI2C();
 
   // PIN Setup
   Serial.println("Hello ESP32 Started!");
@@ -118,7 +122,7 @@ void setup()
   WebSocketServer::initWebRoute();
 
   // Create Multitask
-  // xTaskCreatePinnedToCore(OLED::updateConnectedStationDisplay, "Station Connected Looping", 10000, NULL, 0, &Task1, 1);
+  xTaskCreatePinnedToCore(checkMotorAvailable, "Check ", 10000, NULL, 0, &Task1, 1);
 }
 
 void loop()
