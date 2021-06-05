@@ -34,12 +34,20 @@ public:
   static void initWebSocket();
   static void initWebRoute();
   static void wsLoop();
-  static String fetchInfo();
+  static StaticJsonDocument<300> fetchInfo();
+  static String fetchInfoSerialized();
 
 private:
   static String authorizedSensorId[];
 };
 
+class MQTTClient
+{
+public:
+  static void callback(char *topic, byte *payload, unsigned int length);
+};
+
 void initNtp();
 String getTimestamp();
 NTPClient esTimeClient();
+String getMqttSendPacketData();

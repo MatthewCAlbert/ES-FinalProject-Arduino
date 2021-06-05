@@ -23,10 +23,8 @@ public:
   {
     return serializeDefinedJson(storage[index < 0 || index > 9 ? 0 : index]);
   }
-  String fetchAllSerializedJson(String timestamp = "")
+  StaticJsonDocument<300 * 10> getConcatenatedData(String timestamp = "")
   {
-    String out = "";
-    String outJson = "";
     StaticJsonDocument<300 * 10> doc;
     doc["current_millis"] = millis();
     doc["current_timestamp"] = timestamp;
@@ -34,6 +32,14 @@ public:
 
     for (int i = 0; i < 10; i++)
       nested.add(storage[i]);
+
+    return doc;
+  }
+  String fetchAllSerializedJson(String timestamp = "")
+  {
+    String out = "";
+    String outJson = "";
+    StaticJsonDocument<300 * 10> doc = getConcatenatedData(timestamp);
 
     // for (int i = 0; i < 10; i++)
     // {

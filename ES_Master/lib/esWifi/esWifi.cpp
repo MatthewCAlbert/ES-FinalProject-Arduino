@@ -250,17 +250,17 @@ void WebSocketServer::initWebSocket()
   server.begin();
 }
 
-String WebSocketServer::fetchInfo()
+StaticJsonDocument<300> WebSocketServer::fetchInfo()
 {
   StaticJsonDocument<300> doc;
   doc["timestamp"] = getTimestamp();
-  String out;
 
   JsonObject motor = doc.createNestedObject("motor");
   JsonObject sensor = doc.createNestedObject("sensor");
   if (motorResponded)
   {
     motor["status"] = true;
+    motor["position"] = motorStatus;
     motor["ip"] = motorIp;
     motor["rssi"] = motorRssi;
     motor["wsId"] = motorClientId;
@@ -268,6 +268,7 @@ String WebSocketServer::fetchInfo()
   else
   {
     motor["status"] = false;
+    motor["position"] = "";
     motor["ip"] = "";
     motor["rssi"] = 0;
     motor["wsId"] = "";
@@ -294,8 +295,14 @@ String WebSocketServer::fetchInfo()
     sensor["wsId"] = "";
   }
 
-  serializeJson(doc, out);
+  return doc;
+}
 
+String WebSocketServer::fetchInfoSerialized()
+{
+  String out;
+  StaticJsonDocument<300> doc = fetchInfo();
+  serializeJson(doc, out);
   return out;
 }
 
@@ -309,7 +316,7 @@ void WebSocketServer::initWebRoute()
       });
   server.on(
       "/info", HTTP_GET, [](AsyncWebServerRequest *request)
-      { request->send(200, "application/json", fetchInfo()); });
+      { request->send(200, "application/json", fetchInfoSerialized()); });
   server.on(
       "/sensor/latest", HTTP_GET, [](AsyncWebServerRequest *request)
       { request->send(200, "application/json", myStorage.fetchAllSerializedJson(getTimestamp())); });
@@ -346,4 +353,67 @@ void WebSocketServer::initWebRoute()
 void WebSocketServer::wsLoop()
 {
   ws.cleanupClients();
+}
+
+void MQTTClient::callback(char *topic, byte *payload, unsigned int length)
+{
+  // handle message arrived
+  String msg = "";
+  for (int i = 0; i < length; i++)
+  {
+    msg += (char)payload[i];
+  }
+  // JSON Parsing
+  StaticJsonDocument<JSON_CAPACITY> doc;
+  DeserializationError err = deserializeJson(doc, msg);
+  Serial.printf("\n[MQTT] Message from %s: ", topic);
+  Serial.print(msg);
+
+  if (err)
+  {
+    Serial.print(F("\ndeserializeJson() failed with code "));
+    Serial.println(err.c_str());
+  }
+  else
+  {
+    // Process cause it's JSON
+    if (strcmp(topic, "es/command") == 0)
+    {
+      String command = doc["command"].as<String>();
+      if (command == "open")
+      {
+        Serial.println("[MQTT] Open command received");
+        ESWifi::setCoverStatus("open");
+      }
+      else if (command == "close")
+      {
+        Serial.println("[MQTT] Close command received");
+        ESWifi::setCoverStatus("close");
+      }
+      else
+      {
+        Serial.println("[MQTT] Unknown command received");
+      }
+    }
+
+    if (strcmp(topic, "es/bmkg") == 0)
+    {
+      String deliveredAt = doc["deliveredAt"].as<String>();
+
+      if (doc.containsKey("data"))
+        Serial.println("data found");
+    }
+  }
+}
+
+String getMqttSendPacketData()
+{
+  String out = "";
+  StaticJsonDocument<300 * 11> doc;
+  doc["info"] = WebSocketServer::fetchInfo();
+  doc["sensor"] = myStorage.getConcatenatedData(getTimestamp());
+
+  serializeJson(doc, out);
+
+  return out;
 }

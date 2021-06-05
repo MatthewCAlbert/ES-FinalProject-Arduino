@@ -5,14 +5,14 @@
 - [x] Send command to motor node
 - [x] Master Node auto reconnect
 - [x] Master Node Time Sync
+- [x] Create MQTT Server using VPS
+- [x] MQTT Connection between Master Node and MQTT Broker
 - [ ] Get BMKG Weather from API
 - [ ] Create decision if raining or not at Master Node
 - [ ] Tune Motor Driver for Demo
-- [ ] Create MQTT Server using VPS
-- [ ] MQTT Connection between Master Node and MQTT Broker
-- [ ] Enable bluetooth control capability using MIT AppInventor 2
 
 ## Optional
+- [ ] Enable bluetooth control capability using MIT AppInventor 2
 - [ ] Implement RF Remote using NRF24L01
 - [ ] Enable SSL for WebSocket and WebServer HTTP
 

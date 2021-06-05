@@ -6,6 +6,7 @@
 #include <DHT_U.h>
 #include <ArduinoJson.h>
 #include <ws.h>
+// #include <LCD.h>
 
 const String deviceId = "8218e23c-80cc-49b4-9f6c-be25aee3d6f3";
 
@@ -32,7 +33,7 @@ DHT_Unified dht(TEMPSENSOR_PIN, DHTTYPE);
 
 // Rain Drop Sensor
 #define RAINDROPSENSOR_A_PIN 1
-#define RAINDROPSENSOR_D_PIN 5
+#define RAINDROPSENSOR_D_PIN 16
 
 float round(float var)
 {
@@ -68,10 +69,17 @@ void reconnect(bool first = false, bool force = false)
       WiFi.disconnect();
     }
     WiFi.begin(ssid, password);
+    // int dotCounter = 0;
     while (WiFi.status() != WL_CONNECTED)
     {
       delay(500);
       Serial.print(".");
+      // dotCounter++;
+      // if (dotCounter > 20)
+      // {
+      //   reconnect(true);
+      //   return;
+      // }
     }
 
     Serial.println("");
@@ -200,10 +208,47 @@ void printDebugAllSensor()
   printDht();
 }
 
+float maxInThree = 0;
+float prevMaxInThree = 0;
+unsigned long prevPollingTime = 0;
+void motongLoop()
+{
+  float prevAvgIn15 = 0;
+  float avgIn15 = 0;
+  int avgCount = 0;
+
+  int prevTimeAvg = 0;
+  for (;;)
+  {
+    currentTime = millis();
+    float rainWetness = getRainWetness();
+    if (currentTime - prevTimeSend > 3000)
+    {
+      prevTimeSend = currentTime;
+      prevMaxInThree = maxInThree;
+      maxInThree = 0;
+      avgIn15 += prevMaxInThree;
+      avgCount++;
+    }
+    if (currentTime - prevTimeAvg > 15000)
+    {
+      prevTimeAvg = currentTime;
+      prevAvgIn15 = avgIn15 / avgCount;
+      avgCount = 0;
+      avgIn15 = 0;
+    }
+    // Serial.println("checking sensor..");
+    // writeSensorData(rainWetness, prevMaxInThree, prevAvgIn15);
+    maxInThree = rainWetness > maxInThree ? rainWetness : maxInThree;
+    delay(100);
+  }
+}
+
 void setup()
 {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  // initLcd();
 
   // Multiplexer
   pinMode(MUXPinS0, OUTPUT);
@@ -214,6 +259,11 @@ void setup()
   // Other sensor
   dht.begin();
   pinMode(RAINDROPSENSOR_D_PIN, INPUT);
+
+  // For experiment using LCD
+  // motongLoop();
+
+  // Connection
   reconnect(true);
   WS::setReplied(true);
 }
@@ -243,10 +293,18 @@ void loop()
     }
   }
 
+  if (currentTime - prevPollingTime > 100)
+  {
+    prevPollingTime = currentTime;
+    float rainWetness = getRainWetness();
+    maxInThree = rainWetness > maxInThree ? rainWetness : maxInThree;
+  }
   if (currentTime - prevTimeSend > intervalSend)
   {
     prevTimeSend = currentTime;
-    String jsonPackage = createSerializedJsonSensorPack(round(getRainWetness()), getTemperature(), getHumidity(), getLuminance());
+    prevMaxInThree = maxInThree;
+    maxInThree = 0;
+    String jsonPackage = createSerializedJsonSensorPack(round(prevMaxInThree), getTemperature(), getHumidity(), getLuminance());
 
     if (WS::getReplied() && WS::sendJson(jsonPackage))
     {

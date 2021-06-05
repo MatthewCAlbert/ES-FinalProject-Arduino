@@ -4,26 +4,39 @@
 #include <utils.h>
 #include <esWifi.h>
 #include <HTTPClient.h>
+#include <PubSubClient.h>
+#include <BT.h>
+// #include <BLE.h>
 
 // Don't forget to create this file first
+const char *deviceId = "f17d53fd-f843-431b-a5e0-305126625841";
 #include "secret.h"
 
 const bool ENABLE_HTTP_ENDPOINT = true;
+const bool DISABLE_STAMODE = false;
 
 // WiFi AP Credential
 const char *ap_ssid = "ES_Master";
 const char *ap_password = "5vS4hFyM3fEfFvYt";
 const int ap_channel = 9;
-const int hide_ssid = 1;
+const int hide_ssid = 0;
 const int ap_max_connection = 3;
 IPAddress IP = {10, 10, 1, 1};
 IPAddress gateway = {10, 10, 1, 1};
 IPAddress NMask = {255, 255, 255, 248};
+bool firstWifiSTAConnectInitiated = false;
+
+// MQTT Client
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
 
 #define RST_BTN 32
 
 TaskHandle_t Task1;
 TaskHandle_t Task2;
+TaskHandle_t TaskWifi;
+TaskHandle_t TaskMqtt;
+TaskHandle_t TaskMqttTx;
 static HTTPClient http;
 
 unsigned long currentTime_ms;
@@ -32,6 +45,7 @@ const unsigned long resetButtonTimeout_ms = 5000;
 unsigned long lastDebounceTime = 0;
 unsigned long lastWifiCheckTime = 0;
 byte prevKeyState = LOW;
+
 void readRstButton()
 {
   if (digitalRead(RST_BTN) == HIGH && prevKeyState == LOW)
@@ -50,31 +64,114 @@ void readRstButton()
   delay(20);
 }
 
-void reconnect(bool first = false)
+void mqttReconnect()
+{
+  // Loop until we're reconnected
+  while (!mqttClient.connected())
+  {
+    Serial.print("Attempting MQTT connection...");
+    String clientId = "ESMasterClient-";
+    clientId += String(random(0xffff), HEX);
+    if (mqttClient.connect(clientId.c_str(), mqtt_username, mqtt_password))
+    {
+      Serial.println("\n[MQTT] Connected");
+      String subTopic = "escommand-" + (String)deviceId;
+
+      Serial.printf("[MQTT] Subscribe to command %s\n", mqttClient.subscribe("es/command") ? "SUCCESS" : "FAILED");
+      Serial.printf("[MQTT] Subscribe to bmkg %s\n", mqttClient.subscribe("es/bmkg") ? "SUCCESS" : "FAILED");
+    }
+    else
+    {
+      Serial.println("[MQTT] Connect Failed");
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+void checkMqttConnection(void *parameter)
+{
+  for (;;)
+  {
+    // Serial.println("\n[MQTT] Checking connection");
+    if (WiFi.status() == WL_CONNECTED)
+      mqttReconnect();
+    delay(1000);
+  }
+}
+
+void sendMqttPublishData()
+{
+  if (mqttClient.connected())
+  {
+    Serial.println("\n[MQTT] Publishing data");
+    // String pubTopic = "esdata-" + (String)deviceId;
+    String payload = getMqttSendPacketData();
+    // Serial.println(payload);
+
+    if (mqttClient.publish("es/data", payload.c_str()))
+    {
+      Serial.println("[MQTT] Publishing data OK");
+    }
+    else
+    {
+      Serial.println("[MQTT] Publish data FAILED");
+    }
+  }
+}
+
+void mqttIntervalTxAction(void *parameter)
+{
+  for (;;)
+  {
+    sendMqttPublishData();
+    delay(30000);
+  }
+}
+
+void reconnect(bool first = false, bool force = false)
 {
   //Attempt connect again
-  if (first)
-    Serial.print("\nConnecting to Upstream WiFi");
-  else
+  if (WiFi.status() != WL_CONNECTED)
   {
-    Serial.print("\nReconnecting to Upstream WiFi");
-    WiFi.disconnect();
-  }
-  WiFi.begin(m_ssid, m_password);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
+    if (first)
+    {
+      Serial.print("\nConnecting to Upstream WiFi");
+    }
+    else
+    {
+      Serial.print("\nReconnecting to Upstream WiFi");
+      WiFi.disconnect();
+    }
+    WiFi.begin(m_ssid, m_password);
+    int dotCounter = 0;
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      delay(500);
+      Serial.print(".");
+      dotCounter++;
+      if (dotCounter > 30)
+      {
+        WiFi.disconnect();
+        return;
+      }
+    }
 
-  Serial.println("");
-  Serial.println("Upstream WiFi connection Successful");
-  Serial.print("The IP Address of ESP32 Module is: ");
-  Serial.print(WiFi.localIP()); // Print the IP address
+    Serial.println("");
+    Serial.println("Upstream WiFi connection Successful");
+    Serial.print("The IP Address of ESP32 Module is: ");
+    Serial.print(WiFi.localIP()); // Print the IP address
 
-  if (first)
-  {
-    initNtp();
+    if (first)
+    {
+      initNtp();
+      mqttClient.setServer(mqtt_server, 1883);
+      mqttClient.setCallback(MQTTClient::callback);
+      mqttClient.setBufferSize(4096);
+      firstWifiSTAConnectInitiated = true;
+    }
   }
 }
 
@@ -88,6 +185,19 @@ void checkWiFiConnection()
       WiFi.disconnect();
       reconnect();
     }
+  }
+}
+
+void staCheckLoop(void *parameter)
+{
+  for (;;)
+  {
+    Serial.println("Checking WiFi Connection..");
+    if (!firstWifiSTAConnectInitiated)
+      reconnect(true);
+    else
+      reconnect();
+    delay(30000);
   }
 }
 
@@ -109,6 +219,15 @@ void displayNtpClock(void *parameter)
   }
 }
 
+void loopBTTest(void *parameter)
+{
+  for (;;)
+  {
+    btLoop();
+    // delay(20);
+  }
+}
+
 void setup()
 {
   // put your setup code here, to run once:
@@ -121,7 +240,18 @@ void setup()
   pinMode(LED_1, OUTPUT);
   pinMode(RST_BTN, INPUT_PULLDOWN);
 
-  WiFi.mode(WIFI_MODE_APSTA);
+  // Clear WiFi previous saved config to prevent AP problem
+  WiFi.disconnect(true, true);
+
+  if (!DISABLE_STAMODE)
+  {
+    WiFi.mode(WIFI_MODE_APSTA);
+    xTaskCreatePinnedToCore(staCheckLoop, "Wifi STA Check Loop", 10000, NULL, 0, &TaskWifi, 1);
+  }
+  else
+  {
+    WiFi.mode(WIFI_MODE_AP);
+  }
   // Create AP
   WiFi.softAP(ap_ssid, ap_password, ap_channel, hide_ssid, ap_max_connection);
   WiFi.softAPConfig(IP, gateway, NMask);
@@ -131,8 +261,6 @@ void setup()
   Serial.print("AP IP address: ");
   Serial.println(IP);
 
-  reconnect(true);
-
   // Start Server
   WebSocketServer::initWebSocket();
 
@@ -140,8 +268,17 @@ void setup()
   if (ENABLE_HTTP_ENDPOINT)
     WebSocketServer::initWebRoute();
 
+  // Init Bluetooth
+  // initBLE();
+  // initBt();
+
   // Create Multitask
+  xTaskCreatePinnedToCore(checkMqttConnection, "Check MQTT Status", 10000, NULL, 1, &TaskMqtt, 1);
+  xTaskCreatePinnedToCore(mqttIntervalTxAction, "MQTT Interval TX", 30000, NULL, 2, &TaskMqttTx, 1);
   xTaskCreatePinnedToCore(checkMotorAvailable, "Check Motor Availabiliy Status", 10000, NULL, 0, &Task1, 1);
+
+  // Multitask for testing
+  // xTaskCreatePinnedToCore(loopBTTest, "BT Test Loop", 10000, NULL, 0, &Task2, 1);
   // xTaskCreatePinnedToCore(displayNtpClock, "Check Time", 10000, NULL, 0, &Task2, 1);
 }
 
@@ -150,7 +287,10 @@ void loop()
   currentTime_ms = millis();
   // put your main code here, to run repeatedly:
   readRstButton();
-  checkWiFiConnection();
+  // checkWiFiConnection(); // No longer used, task moved to thread
   // checkRF();
   WebSocketServer::wsLoop();
+
+  if (mqttClient.connected())
+    mqttClient.loop();
 }
