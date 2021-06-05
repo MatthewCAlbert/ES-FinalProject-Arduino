@@ -3,6 +3,11 @@
 static HTTPClient http;
 static WiFiClient client;
 
+// LED Indicator
+static const int LED1_PIN = 4;
+static const int LED2_PIN = 16;
+static const int LED3_PIN = 17;
+
 //NTP
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -55,6 +60,8 @@ String motorStatus = "";
 int motorRssi = 0;
 
 SensorStorage myStorage;
+bool overrideDecision = false;
+int currentDecision = FUZZ_STAY;
 
 // Websockets
 AsyncWebServer server(80);
@@ -95,11 +102,12 @@ String ESWifi::getCoverStatus()
   }
   return motorStatus == "" ? "no status" : motorStatus;
 }
-bool ESWifi::setCoverStatus(String command)
+bool ESWifi::setCoverStatus(String command, int verbose)
 {
   if (motorIp == "" || !motorResponded || motorClientId == 0)
   {
-    Serial.println("Motor node not connected");
+    if (verbose > 0)
+      Serial.println("Motor node not connected");
     return false;
   }
   StaticJsonDocument<128> doc;
@@ -109,10 +117,54 @@ bool ESWifi::setCoverStatus(String command)
   serializeJson(doc, out);
 
   motorResponded = false;
-  Serial.printf("\nCommand Sent to Client #%d\n", motorClientId);
+  if (verbose > 1)
+    Serial.printf("\nCommand Sent to Client #%d\n", motorClientId);
   ws.text(motorClientId, out);
 
   return true;
+}
+String ESWifi::getLocalMotorStatus()
+{
+  return motorStatus;
+}
+int ESWifi::getCurrentDecision()
+{
+  return currentDecision;
+}
+void ESWifi::decisionMaker()
+{
+  int fuzzyResult = Decision::fuzzyLogic(myStorage.getStorage());
+
+  if ((fuzzyResult == 2 || fuzzyResult == 4) && fuzzyResult != currentDecision)
+  {
+    Serial.printf("\n[FUZZY] Want to open");
+  }
+  else if ((fuzzyResult == 3 || fuzzyResult == 5) && fuzzyResult != currentDecision)
+  {
+    Serial.printf("\n[FUZZY] Want to close");
+  }
+
+  if (overrideDecision && fuzzyResult != currentDecision && fuzzyResult < 4)
+    Serial.print(" but rejected by you.");
+
+  if (!overrideDecision && fuzzyResult != currentDecision)
+  {
+    if (fuzzyResult == 2)
+      setCoverStatus("open", 1);
+    else if (fuzzyResult == 3)
+      setCoverStatus("close", 1);
+  }
+  else
+  {
+    // FORCED MODE
+    if (fuzzyResult == 4)
+      setCoverStatus("open", 1);
+    else if (fuzzyResult == 5)
+      setCoverStatus("close", 1);
+  }
+
+  Serial.println("");
+  currentDecision = fuzzyResult;
 }
 
 void WebSocketServer::notifyClients()
@@ -261,6 +313,7 @@ StaticJsonDocument<300> WebSocketServer::fetchInfo()
   {
     motor["status"] = true;
     motor["position"] = motorStatus;
+    motor["mode"] = overrideDecision ? "forced" : "auto";
     motor["ip"] = motorIp;
     motor["rssi"] = motorRssi;
     motor["wsId"] = motorClientId;
@@ -268,6 +321,7 @@ StaticJsonDocument<300> WebSocketServer::fetchInfo()
   else
   {
     motor["status"] = false;
+    motor["mode"] = "none";
     motor["position"] = "";
     motor["ip"] = "";
     motor["rssi"] = 0;
@@ -312,11 +366,51 @@ void WebSocketServer::initWebRoute()
       "/check", HTTP_GET, [](AsyncWebServerRequest *request)
       {
         Serial.println("\n[HTTP Received] Server Checked");
-        request->send_P(200, "text/plain", "Ok");
+        request->send(200, "text/plain", "Ok");
+      });
+  server.on(
+      "/remote", HTTP_GET, [](AsyncWebServerRequest *request)
+      {
+        Serial.println("\n[HTTP Received] Server Checked");
+        request->send_P(200, "text/html", getHtml().c_str());
       });
   server.on(
       "/info", HTTP_GET, [](AsyncWebServerRequest *request)
       { request->send(200, "application/json", fetchInfoSerialized()); });
+
+  server.on(
+      "/pinfo", HTTP_GET, [](AsyncWebServerRequest *request)
+      {
+        if (sensorRssi == 0)
+        {
+          request->send(500, "text/plain", "Error");
+        }
+
+        StaticJsonDocument<300> doc;
+        doc["override"] = overrideDecision;
+        doc["status"] = motorStatus;
+        doc["motorRssi"] = motorRssi;
+        doc["sensorRssi"] = sensorRssi;
+
+        JsonObject sensorData = doc.createNestedObject("sensor");
+        StaticJsonDocument<300> sensor = myStorage.getStorage()[0];
+
+        if (sensor != NULL)
+        {
+          sensorData["temperature"] = sensor["data"]["temperature"];
+          sensorData["humidity"] = sensor["data"]["humidity"];
+        }
+        else
+        {
+          sensorData["temperature"] = 0;
+          sensorData["humidity"] = 0;
+        }
+
+        String out = "";
+        serializeJson(doc, out);
+
+        request->send(200, "application/json", out.c_str());
+      });
   server.on(
       "/sensor/latest", HTTP_GET, [](AsyncWebServerRequest *request)
       { request->send(200, "application/json", myStorage.fetchAllSerializedJson(getTimestamp())); });
@@ -336,18 +430,34 @@ void WebSocketServer::initWebRoute()
 
   server.on(
       "/motor/status", HTTP_GET, [](AsyncWebServerRequest *request)
-      { request->send_P(200, "text/plain", ESWifi::getCoverStatus().c_str()); });
+      { request->send(200, "text/plain", ESWifi::getCoverStatus().c_str()); });
 
   // Server Motor Control
   server.on(
       "/motor/set/toggle", HTTP_GET, [](AsyncWebServerRequest *request)
-      { request->send_P(200, "text/plain", ESWifi::setCoverStatus(motorStatus == "closed" ? "open" : "close") ? "Sent" : "Failed"); });
+      {
+        overrideDecision = true;
+        request->send(200, "text/plain", ESWifi::setCoverStatus(motorStatus == "closed" ? "open" : "close") ? "Sent" : "Failed");
+      });
+  server.on(
+      "/motor/set/auto", HTTP_GET, [](AsyncWebServerRequest *request)
+      {
+        overrideDecision = false;
+        currentDecision = 1;
+        request->send(200, "text/plain", "Ok");
+      });
   server.on(
       "/motor/set/open", HTTP_GET, [](AsyncWebServerRequest *request)
-      { request->send_P(200, "text/plain", ESWifi::setCoverStatus("open") ? "Sent" : "Failed"); });
+      {
+        overrideDecision = true;
+        request->send(200, "text/plain", ESWifi::setCoverStatus("open") ? "Sent" : "Failed");
+      });
   server.on(
       "/motor/set/close", HTTP_GET, [](AsyncWebServerRequest *request)
-      { request->send_P(200, "text/plain", ESWifi::setCoverStatus("close") ? "Sent" : "Failed"); });
+      {
+        overrideDecision = true;
+        request->send(200, "text/plain", ESWifi::setCoverStatus("close") ? "Sent" : "Failed");
+      });
 }
 
 void WebSocketServer::wsLoop()
@@ -384,11 +494,19 @@ void MQTTClient::callback(char *topic, byte *payload, unsigned int length)
       {
         Serial.println("[MQTT] Open command received");
         ESWifi::setCoverStatus("open");
+        overrideDecision = true;
       }
       else if (command == "close")
       {
         Serial.println("[MQTT] Close command received");
         ESWifi::setCoverStatus("close");
+        overrideDecision = true;
+      }
+      else if (command == "auto")
+      {
+        Serial.println("[MQTT] Auto command received");
+        overrideDecision = false;
+        currentDecision = 1;
       }
       else
       {
@@ -416,4 +534,22 @@ String getMqttSendPacketData()
   serializeJson(doc, out);
 
   return out;
+}
+
+void setLedIndicator()
+{
+  if (motorStatus == "open" || motorStatus == "no status")
+    digitalWrite(LED2_PIN, HIGH);
+  else
+    digitalWrite(LED2_PIN, LOW);
+
+  if (currentDecision == 2 || currentDecision == 4)
+    digitalWrite(LED3_PIN, HIGH);
+  else
+    digitalWrite(LED3_PIN, LOW);
+
+  if (currentDecision == 2 || currentDecision == 4)
+    digitalWrite(LED1_PIN, HIGH);
+  else
+    digitalWrite(LED1_PIN, LOW);
 }

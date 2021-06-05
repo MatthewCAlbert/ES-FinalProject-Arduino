@@ -4,6 +4,8 @@
 #include <HTTPClient.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <Decision.h>
+#include <WebHTML.h>
 
 #ifdef ESP32
 #include <WiFi.h>
@@ -22,7 +24,10 @@ public:
   static void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info);
   static void pingMotor();
   static String getCoverStatus();
-  static bool setCoverStatus(String command);
+  static String getLocalMotorStatus();
+  static int getCurrentDecision();
+  static bool setCoverStatus(String command, int verbose = 3);
+  static void decisionMaker();
 };
 
 class WebSocketServer
@@ -51,3 +56,4 @@ void initNtp();
 String getTimestamp();
 NTPClient esTimeClient();
 String getMqttSendPacketData();
+void setLedIndicator();

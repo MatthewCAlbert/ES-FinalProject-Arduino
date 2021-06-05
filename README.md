@@ -7,8 +7,9 @@
 - [x] Master Node Time Sync
 - [x] Create MQTT Server using VPS
 - [x] MQTT Connection between Master Node and MQTT Broker
+- [x] Create decision if raining or not at Master Node
+- [x] Local Remote Web Control
 - [ ] Get BMKG Weather from API
-- [ ] Create decision if raining or not at Master Node
 - [ ] Tune Motor Driver for Demo
 
 ## Optional

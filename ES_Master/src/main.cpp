@@ -5,7 +5,7 @@
 #include <esWifi.h>
 #include <HTTPClient.h>
 #include <PubSubClient.h>
-#include <BT.h>
+// #include <BT.h>
 // #include <BLE.h>
 
 // Don't forget to create this file first
@@ -32,11 +32,16 @@ PubSubClient mqttClient(espClient);
 
 #define RST_BTN 32
 
+static const int LED1_PIN = 4;
+static const int LED2_PIN = 16;
+static const int LED3_PIN = 17;
+
 TaskHandle_t Task1;
 TaskHandle_t Task2;
 TaskHandle_t TaskWifi;
 TaskHandle_t TaskMqtt;
 TaskHandle_t TaskMqttTx;
+TaskHandle_t TaskMakeDecision;
 static HTTPClient http;
 
 unsigned long currentTime_ms;
@@ -62,6 +67,15 @@ void readRstButton()
       Serial.println("Pressed once");
   }
   delay(20);
+}
+
+void decisionLoop(void *parameter)
+{
+  for (;;)
+  {
+    ESWifi::decisionMaker();
+    delay(5000);
+  }
 }
 
 void mqttReconnect()
@@ -96,6 +110,8 @@ void checkMqttConnection(void *parameter)
   for (;;)
   {
     // Serial.println("\n[MQTT] Checking connection");
+    setLedIndicator();
+
     if (WiFi.status() == WL_CONNECTED)
       mqttReconnect();
     delay(1000);
@@ -223,7 +239,7 @@ void loopBTTest(void *parameter)
 {
   for (;;)
   {
-    btLoop();
+    // btLoop();
     // delay(20);
   }
 }
@@ -237,8 +253,14 @@ void setup()
   // PIN Setup
   Serial.println("Hello ESP32 Started!");
   pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(LED_1, OUTPUT);
+  pinMode(LED1_PIN, OUTPUT);
+  pinMode(LED2_PIN, OUTPUT);
+  pinMode(LED3_PIN, OUTPUT);
   pinMode(RST_BTN, INPUT_PULLDOWN);
+
+  digitalWrite(LED1_PIN, LOW);
+  digitalWrite(LED2_PIN, LOW);
+  digitalWrite(LED3_PIN, LOW);
 
   // Clear WiFi previous saved config to prevent AP problem
   WiFi.disconnect(true, true);
@@ -273,9 +295,10 @@ void setup()
   // initBt();
 
   // Create Multitask
+  xTaskCreatePinnedToCore(checkMotorAvailable, "Check Motor Availabiliy Status", 10000, NULL, 0, &Task1, 1);
+  xTaskCreatePinnedToCore(decisionLoop, "Make Decision", 10000, NULL, 0, &TaskMakeDecision, 1);
   xTaskCreatePinnedToCore(checkMqttConnection, "Check MQTT Status", 10000, NULL, 1, &TaskMqtt, 1);
   xTaskCreatePinnedToCore(mqttIntervalTxAction, "MQTT Interval TX", 30000, NULL, 2, &TaskMqttTx, 1);
-  xTaskCreatePinnedToCore(checkMotorAvailable, "Check Motor Availabiliy Status", 10000, NULL, 0, &Task1, 1);
 
   // Multitask for testing
   // xTaskCreatePinnedToCore(loopBTTest, "BT Test Loop", 10000, NULL, 0, &Task2, 1);

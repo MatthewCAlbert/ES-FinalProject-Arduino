@@ -1,17 +1,13 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-#define LED_1 23
-
 void ledLoop(void *parameter)
 {
   for (;;)
   {
     digitalWrite(LED_BUILTIN, HIGH);
-    digitalWrite(LED_1, HIGH);
     delay(1000);
     digitalWrite(LED_BUILTIN, LOW);
-    digitalWrite(LED_1, LOW);
     delay(1000);
   }
 }
