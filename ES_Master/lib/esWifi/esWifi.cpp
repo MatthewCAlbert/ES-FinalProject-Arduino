@@ -116,6 +116,13 @@ bool ESWifi::setCoverStatus(String command, int verbose)
   doc["command"] = command;
   serializeJson(doc, out);
 
+  // DISABLE OPEN OVERIDDER
+  if (command == "open" && currentDecision == 5 && overrideDecision)
+  {
+    Serial.println("Cannot override on heavy rain");
+    return false;
+  }
+
   motorResponded = false;
   if (verbose > 1)
     Serial.printf("\nCommand Sent to Client #%d\n", motorClientId);
@@ -212,7 +219,7 @@ void WebSocketServer::handleWebSocketMessage(void *arg, AsyncWebSocket *server, 
       {
         Serial.println(msg);
         // doc["rssi"];
-        // doc["data"]["wetness"];
+        float wetness = doc["data"]["wetness"].as<float>();
         // doc["data"]["temperature"];
         // doc["data"]["humidity"];
         // doc["data"]["luminance"];
@@ -220,8 +227,14 @@ void WebSocketServer::handleWebSocketMessage(void *arg, AsyncWebSocket *server, 
         // Serial.printf("\n Sensor %.2f\n", dat["temperature"]);
         // Serial.printf("\n Sensor %.2f\n", dat["temperature"].as<float>());
         // Serial.printf("\n Sensor %.2f\n", doc["data"]["temperature"]);
+
         sensorRssi = doc["rssi"].as<int>();
         myStorage.push(doc, getTimestamp());
+        if (wetness > 0.6)
+        {
+          ESWifi::decisionMaker();
+        }
+
         Serial.println("Ok sensor data received");
       }
       else if (doc["type"] == "sensor-register")

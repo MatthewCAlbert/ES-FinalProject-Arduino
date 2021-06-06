@@ -9,10 +9,10 @@
 - [x] MQTT Connection between Master Node and MQTT Broker
 - [x] Create decision if raining or not at Master Node
 - [x] Local Remote Web Control
-- [ ] Get BMKG Weather from API
-- [ ] Tune Motor Driver for Demo
+- [x] Tune Motor Driver for Demo
 
 ## Optional
+- [ ] Get BMKG Weather from API
 - [ ] Enable bluetooth control capability using MIT AppInventor 2
 - [ ] Implement RF Remote using NRF24L01
 - [ ] Enable SSL for WebSocket and WebServer HTTP

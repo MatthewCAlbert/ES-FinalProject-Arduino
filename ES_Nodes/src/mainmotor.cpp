@@ -8,6 +8,8 @@ const String deviceId = "73aecc58-9e23-44a6-bfd0-0ef2af38435c";
 const char *websockets_server_host = "10.10.1.1"; //Enter server adress
 const uint16_t websockets_server_port = 80;       // Enter server port
 
+static const int ledIndicatorPin = D8;
+
 // Store motor state
 bool motorOpen = true;
 
@@ -182,10 +184,21 @@ void setup()
 {
   // put your setup code here, to run once:
   Serial.begin(115200);
-  MotorDriver::initPin();
+  MotorDriver::initPin(130);
+
+  pinMode(ledIndicatorPin, OUTPUT);
+  digitalWrite(ledIndicatorPin, motorOpen ? HIGH : LOW);
 
   reconnect(true);
   wsReplied = true;
+
+  // for (;;)
+  // {
+  //   MotorDriver::setMotorRunning(1, 0, 1, 0);
+  //   delay(3500);
+  //   MotorDriver::setMotorRunning(0, 1, 0, 1);
+  //   delay(500);
+  // }
 }
 
 void loop()

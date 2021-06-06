@@ -1,5 +1,7 @@
 #include "MotorDriver.h"
 
+static const int ledIndicatorPin = D8;
+
 bool motorInProgress = false;
 static int motorTiming = 3000;
 static int en_a = D4;
@@ -10,7 +12,7 @@ static int en_b = D7;
 static int in_3 = D5;
 static int in_4 = D6;
 
-void MotorDriver::initPin()
+void MotorDriver::initPin(int PWM)
 {
   pinMode(en_a, OUTPUT);
   pinMode(in_1, OUTPUT);
@@ -24,8 +26,8 @@ void MotorDriver::initPin()
   digitalWrite(in_3, LOW);
   digitalWrite(in_4, LOW);
 
-  analogWrite(en_a, 50);
-  analogWrite(en_b, 50);
+  analogWrite(en_a, PWM);
+  analogWrite(en_b, PWM);
 }
 bool MotorDriver::sendCommand(String command, bool *isOpen)
 {
@@ -40,20 +42,22 @@ bool MotorDriver::sendCommand(String command, bool *isOpen)
   if (command == "close" && *isOpen)
   {
     Serial.println("\n[Motor CMD] Sending close command.");
-    setMotorRunning(1, 0, 1, 0);
+    MotorDriver::setMotorRunning(1, 0, 1, 0);
     delay(motorTiming);
-    setMotorRunning(0, 0, 0, 0);
+    MotorDriver::setMotorRunning(0, 0, 0, 0);
     Serial.println("\n[Motor CMD] Motor stopped.");
     *isOpen = false;
+    digitalWrite(ledIndicatorPin, LOW);
   }
   else if (command == "open" && !*isOpen)
   {
     Serial.println("\n[Motor CMD] Sending open command.");
-    setMotorRunning(0, 1, 0, 1);
+    MotorDriver::setMotorRunning(0, 1, 0, 1);
     delay(motorTiming);
-    setMotorRunning(0, 0, 0, 0);
+    MotorDriver::setMotorRunning(0, 0, 0, 0);
     Serial.println("\n[Motor CMD] Motor stopped.");
     *isOpen = true;
+    digitalWrite(ledIndicatorPin, HIGH);
   }
   else
   {

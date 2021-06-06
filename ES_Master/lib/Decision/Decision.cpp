@@ -37,7 +37,7 @@ int Decision::fuzzyLogic(StaticJsonDocument<300> *_storage)
   }
   else if (score < 0.05)
   {
-    return FUZZ_OPEN_FORCE;
+    return FUZZ_OPEN;
   }
 
   return FUZZ_STAY;
